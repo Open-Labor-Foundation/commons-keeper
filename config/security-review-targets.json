@@ -1,0 +1,62 @@
+[
+  {
+    "name": "labor-commons",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/labor-commons.git",
+    "codeDirs": ["data", "infra", ".github/workflows"],
+    "codeExtensions": [".mjs", ".js", ".py", ".sh", ".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
+    "name": "commons-keeper",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-keeper.git",
+    "codeDirs": ["src", ".github/workflows"],
+    "codeExtensions": [".mjs", ".js", ".sh", ".yml", ".yaml"],
+    "codeFiles": ["entrypoint.sh", "Dockerfile"]
+  },
+  {
+    "name": "commons-board",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-board.git",
+    "codeDirs": ["services", "apps", "packages", ".github/workflows"],
+    "codeExtensions": [".ts", ".tsx", ".js", ".mjs", ".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
+    "name": "commons-crew",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-crew.git",
+    "codeDirs": ["apps", "packages", "infra", ".github/workflows"],
+    "codeExtensions": [".ts", ".tsx", ".js", ".mjs", ".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
+    "name": "commons-artifacts",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-artifacts.git",
+    "codeDirs": ["ca-board-addins", ".github/workflows"],
+    "codeExtensions": [".py", ".js", ".mjs", ".ts", ".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
+    "name": "open-labor-foundation",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/open-labor-foundation.git",
+    "codeDirs": [".github"],
+    "codeExtensions": [".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
+    "name": "commons-specs",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-specs.git",
+    "skip": true,
+    "skipReason": "doc-only repository, no executable code"
+  },
+  {
+    "name": "commons-idea",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-idea.git",
+    "skip": true,
+    "skipReason": "doc-only repository, no executable code"
+  },
+  {
+    "name": "foundation-site",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/foundation-site.git",
+    "skip": true,
+    "skipReason": "doc-only repository, no executable code"
+  }
+]

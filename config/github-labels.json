@@ -1,0 +1,117 @@
+[
+  {
+    "name": "agent-ready",
+    "color": "0e8a16",
+    "description": "Scoped and ready for an agent to pick up"
+  },
+  {
+    "name": "needs-spec",
+    "color": "d4c5f9",
+    "description": "Needs clearer scope or acceptance criteria"
+  },
+  {
+    "name": "needs-spec-pack",
+    "color": "c5def5",
+    "description": "Needs a market-ready spec-first package for runtime use or later build promotion"
+  },
+  {
+    "name": "blocked",
+    "color": "b60205",
+    "description": "Blocked by an external dependency or decision"
+  },
+  {
+    "name": "human-review",
+    "color": "fbca04",
+    "description": "Needs explicit human review before merge"
+  },
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Defect or regression"
+  },
+  {
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "Feature or improvement request"
+  },
+  {
+    "name": "docs",
+    "color": "0075ca",
+    "description": "Documentation work"
+  },
+  {
+    "name": "infra",
+    "color": "5319e7",
+    "description": "Infrastructure, CI, or repository automation"
+  },
+  {
+    "name": "type:agent",
+    "color": "1d76db",
+    "description": "Specialist-agent definition or implementation work"
+  },
+  {
+    "name": "type:spec",
+    "color": "0052cc",
+    "description": "Specification or design-definition work"
+  },
+  {
+    "name": "type:planning",
+    "color": "5319e7",
+    "description": "Queue, roadmap, or planning work"
+  },
+  {
+    "name": "security",
+    "color": "b60205",
+    "description": "Security-sensitive work"
+  },
+  {
+    "name": "dependency",
+    "color": "0e8a16",
+    "description": "Third-party dependency vulnerability or mitigation"
+  },
+  {
+    "name": "spec-pack",
+    "color": "0052cc",
+    "description": "Filed by commons-keeper — specialist needs attention"
+  },
+  {
+    "name": "p0",
+    "color": "b60205",
+    "description": "Blocking issues or high-severity regressions"
+  },
+  {
+    "name": "p1",
+    "color": "d93f0b",
+    "description": "Critical issues present"
+  },
+  {
+    "name": "p2",
+    "color": "e4e669",
+    "description": "Advisory — needs refinement"
+  },
+  {
+    "name": "waiting-for-contributor",
+    "color": "cccccc",
+    "description": "Awaiting a human or autonomous contributor"
+  },
+  {
+    "name": "priority:p0",
+    "color": "b60205",
+    "description": "Highest priority"
+  },
+  {
+    "name": "priority:p1",
+    "color": "d93f0b",
+    "description": "High priority"
+  },
+  {
+    "name": "state:validated",
+    "color": "0e8a16",
+    "description": "Validated and ready for approval or release"
+  },
+  {
+    "name": "state:released",
+    "color": "1a7f37",
+    "description": "Released or deployment-ready"
+  }
+]

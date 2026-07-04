@@ -1,0 +1,24 @@
+{
+  "name": "commons-keeper",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Catalog health monitor for labor-commons — staleness detection, issue filing, improvement tracking",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "keeper:bootstrap": "node src/bootstrap-labels.mjs",
+    "keeper:bootstrap:dry": "node src/bootstrap-labels.mjs --dry-run",
+    "keeper:run": "node src/improve-catalog.mjs",
+    "keeper:run:schedule": "node src/improve-catalog.mjs --mode passive --trigger schedule",
+    "keeper:run:changed": "node src/improve-catalog.mjs --mode assisted --changed",
+    "keeper:run:autonomous": "node src/improve-catalog.mjs --mode autonomous",
+    "keeper:analyze": "node src/analyze-improvement-history.mjs",
+    "keeper:issues:create": "node src/create-spec-pack-issues.mjs",
+    "keeper:issues:create:dry": "node src/create-spec-pack-issues.mjs --dry-run",
+    "keeper:security:review": "node src/security-review.mjs",
+    "keeper:security:review:dry": "node src/security-review.mjs --dry-run"
+  }
+}

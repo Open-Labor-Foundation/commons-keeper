@@ -13,8 +13,10 @@
  *    check and — only when the vulnerable code path is actually exercised
  *    by this repo's own code — a proposed in-repo mitigation PR.
  *
- * Findings that clear their thresholds get filed as GitHub issues on the
- * repo they were found in.
+ * Findings that clear their thresholds get filed as private draft GitHub
+ * security advisories on the repo they were found in — not public issues,
+ * since an unpatched vulnerability shouldn't be disclosed the moment it's
+ * found.
  */
 
 import path from "node:path";
@@ -31,7 +33,13 @@ import {
   chunkDiffText
 } from "./git-repo.mjs";
 import { callChatModel, extractJsonArray, DEFAULT_BASE_URL, DEFAULT_MODEL } from "./llm-client.mjs";
-import { runDependencyAudit, buildDependencyIssueTitle, buildDependencyIssueBody } from "./dependency-audit.mjs";
+import {
+  runDependencyAudit,
+  buildDependencyAdvisorySummary,
+  buildDependencyAdvisoryDescription,
+  buildDependencyVulnerability,
+  buildDependencyAdvisorySeverity
+} from "./dependency-audit.mjs";
 import { proposeDependencyMitigations } from "./dependency-mitigation.mjs";
 import { loadTargets, loadState, saveState } from "./config-state.mjs";
 
@@ -81,39 +89,39 @@ async function callSecurityReviewModel({ repoName, label, bodyText, apiKey, base
 }
 
 // ---------------------------------------------------------------------------
-// GitHub issue filing — same execFileSync array-arg pattern as
-// create-spec-pack-issues.mjs
+// GitHub security-advisory filing. Findings become private draft advisories
+// (repo Security tab), not public issues — an unpatched vulnerability
+// shouldn't be disclosed the moment it's found. Same execFileSync array-arg
+// pattern as create-spec-pack-issues.mjs, piping the request body over
+// stdin via `gh api --input -` since advisory payloads are nested JSON, not
+// flat `-f key=value` pairs.
 // ---------------------------------------------------------------------------
 
 function findingFingerprint(finding) {
   return `${finding.category ?? "finding"}::${finding.file ?? "unknown"}:${finding.line ?? 0}`;
 }
 
-export function getExistingSecurityIssueTitles(targetRepo) {
+export function getExistingAdvisorySummaries(targetRepo) {
   try {
     const out = execFileSync("gh", [
-      "issue", "list",
-      "--repo", targetRepo,
-      "--label", "security",
-      "--state", "all",
-      "--limit", "500",
-      "--json", "title"
+      "api", `repos/${targetRepo}/security-advisories`,
+      "--paginate",
+      "--jq", ".[].summary"
     ], { encoding: "utf8" });
-    return new Set(JSON.parse(out).map((i) => i.title));
+    return new Set(out.split("\n").filter(Boolean));
   } catch {
-    console.error(`Warning: could not fetch existing security issues for ${targetRepo} — deduplication disabled`);
+    console.error(`Warning: could not fetch existing security advisories for ${targetRepo} — deduplication disabled`);
     return new Set();
   }
 }
 
-function buildIssueTitle(finding) {
+function buildAdvisorySummary(finding) {
   const loc = finding.line ? `${finding.file}:${finding.line}` : finding.file ?? "unknown";
   return `security: ${finding.category ?? "finding"} in ${loc} [${findingFingerprint(finding)}]`;
 }
 
-function buildIssueBody(finding) {
+function buildAdvisoryDescription(finding) {
   return [
-    `**Severity:** ${finding.severity ?? "Medium"}`,
     `**Confidence:** ${finding.confidence ?? "?"}/10`,
     `**Category:** ${finding.category ?? "unknown"}`,
     `**Location:** \`${finding.file ?? "unknown"}${finding.line ? `:${finding.line}` : ""}\``,
@@ -134,31 +142,47 @@ function buildIssueBody(finding) {
   ].join("\n");
 }
 
-export function createOrPreviewIssue(targetRepo, title, body, existingTitles, dryRun) {
-  if (existingTitles.has(title)) {
+const CODE_FINDING_SEVERITY = { High: "high", Medium: "medium" };
+
+function buildCodeFindingVulnerability(targetName, finding) {
+  return {
+    package: { ecosystem: "other", name: targetName },
+    vulnerable_functions: finding.line ? [`${finding.file}:${finding.line}`] : null
+  };
+}
+
+export function createOrPreviewAdvisory(targetRepo, summary, description, vulnerabilities, severity, existingSummaries, dryRun) {
+  if (existingSummaries.has(summary)) {
     return { created: false, reason: "duplicate" };
   }
   if (dryRun) {
-    return { created: true, dryRun: true, title };
+    return { created: true, dryRun: true, summary };
   }
   try {
-    const url = execFileSync("gh", [
-      "issue", "create",
-      "--repo", targetRepo,
-      "--title", title,
-      "--body", body,
-      "--label", "security",
-      "--label", "human-review"
-    ], { encoding: "utf8" }).trim();
-    return { created: true, url, title };
+    const payload = { summary, description, severity, vulnerabilities };
+    const out = execFileSync("gh", [
+      "api", `repos/${targetRepo}/security-advisories`,
+      "-X", "POST",
+      "--input", "-"
+    ], { encoding: "utf8", input: JSON.stringify(payload) }).trim();
+    const { html_url: url } = JSON.parse(out);
+    return { created: true, url, summary };
   } catch (error) {
-    console.error(`Failed to create issue "${title}" in ${targetRepo}:`, error.message);
+    console.error(`Failed to create advisory "${summary}" in ${targetRepo}:`, error.message);
     return { created: false, reason: "gh_error" };
   }
 }
 
-function fileSecurityIssue(targetRepo, finding, existingTitles, dryRun) {
-  return createOrPreviewIssue(targetRepo, buildIssueTitle(finding), buildIssueBody(finding), existingTitles, dryRun);
+function fileSecurityAdvisory(targetRepo, targetName, finding, existingSummaries, dryRun) {
+  return createOrPreviewAdvisory(
+    targetRepo,
+    buildAdvisorySummary(finding),
+    buildAdvisoryDescription(finding),
+    [buildCodeFindingVulnerability(targetName, finding)],
+    CODE_FINDING_SEVERITY[finding.severity] ?? "medium",
+    existingSummaries,
+    dryRun
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +258,7 @@ export async function runSecurityReview(options) {
     // continuously updated advisory database, so it must run every pass
     // regardless of whether any code changed since last time.
     const targetRepo = `Open-Labor-Foundation/${target.name}`;
-    const existingTitles = getExistingSecurityIssueTitles(targetRepo);
+    const existingSummaries = getExistingAdvisorySummaries(targetRepo);
     let filedCount = 0;
     let findingCount = 0;
 
@@ -255,10 +279,10 @@ export async function runSecurityReview(options) {
         );
         findingCount += qualifying.length;
         for (const finding of qualifying) {
-          const result = fileSecurityIssue(targetRepo, finding, existingTitles, dryRun);
+          const result = fileSecurityAdvisory(targetRepo, target.name, finding, existingSummaries, dryRun);
           if (result.created) {
             filedCount += 1;
-            existingTitles.add(result.title);
+            existingSummaries.add(result.summary);
           }
         }
       }
@@ -271,11 +295,19 @@ export async function runSecurityReview(options) {
       const dependencyFindings = runDependencyAudit(workDir, { severityThreshold: dependencySeverityThreshold });
       dependencyFindingCount = dependencyFindings.length;
       for (const finding of dependencyFindings) {
-        const title = buildDependencyIssueTitle(finding);
-        const result = createOrPreviewIssue(targetRepo, title, buildDependencyIssueBody(finding), existingTitles, dryRun);
+        const summary = buildDependencyAdvisorySummary(finding);
+        const result = createOrPreviewAdvisory(
+          targetRepo,
+          summary,
+          buildDependencyAdvisoryDescription(finding),
+          [buildDependencyVulnerability(finding)],
+          buildDependencyAdvisorySeverity(finding),
+          existingSummaries,
+          dryRun
+        );
         if (result.created) {
           dependencyFiledCount += 1;
-          existingTitles.add(title);
+          existingSummaries.add(summary);
         }
       }
 

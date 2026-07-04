@@ -84,8 +84,35 @@ export function runDependencyAudit(workDir, { severityThreshold = "high" } = {})
   return findings;
 }
 
-export function buildDependencyIssueTitle(finding) {
+// GitHub's security-advisory API only accepts a 4-level severity enum;
+// npm audit reports 5 levels. "moderate" and "info" have no direct
+// equivalent, so they fold into the nearest enum value.
+const ADVISORY_SEVERITY = {
+  critical: "critical",
+  high: "high",
+  moderate: "medium",
+  low: "low",
+  info: "low"
+};
+
+export function buildDependencyAdvisorySeverity(finding) {
+  return ADVISORY_SEVERITY[finding.severity] ?? "low";
+}
+
+export function buildDependencyAdvisorySummary(finding) {
   return `security: dependency ${finding.package} (${finding.severity}) [dependency::${finding.package}]`;
+}
+
+function fixedVersion(fixAvailable) {
+  return typeof fixAvailable === "object" && fixAvailable ? fixAvailable.version : null;
+}
+
+export function buildDependencyVulnerability(finding) {
+  return {
+    package: { ecosystem: "npm", name: finding.package },
+    vulnerable_version_range: finding.range ?? null,
+    patched_versions: fixedVersion(finding.fixAvailable)
+  };
 }
 
 function formatFixAvailable(fixAvailable) {
@@ -97,7 +124,7 @@ function formatFixAvailable(fixAvailable) {
   return "Run `npm audit fix` to resolve.";
 }
 
-export function buildDependencyIssueBody(finding) {
+export function buildDependencyAdvisoryDescription(finding) {
   const advisoryLines = finding.advisories.length
     ? finding.advisories.map((a) => `- [${a.title ?? "advisory"}](${a.url ?? "#"}) — severity: ${a.severity ?? finding.severity}`)
     : ["(no advisory detail provided)"];

@@ -378,6 +378,6 @@ export function formatSecurityReviewSummary(summary) {
   for (const entry of summary.skipped) {
     lines.push(`[skip]     ${entry.repo}: ${entry.reason}`);
   }
-  lines.push("", `Total issues filed: ${summary.findingsFiled}`, `Total mitigation PRs opened: ${summary.mitigationPrsOpened}`);
+  lines.push("", `Total advisories filed: ${summary.findingsFiled}`, `Total mitigation PRs opened: ${summary.mitigationPrsOpened}`);
   return `${lines.join("\n")}\n`;
 }

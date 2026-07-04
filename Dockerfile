@@ -17,7 +17,7 @@ COPY package.json .
 RUN npm install --omit=dev 2>/dev/null || true
 
 COPY src/ src/
-COPY config/github-labels.json config/github-labels.json
+COPY config/ config/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -10,22 +10,42 @@
 export const DEFAULT_BASE_URL = "https://api.featherless.ai/v1";
 export const DEFAULT_MODEL = "Qwen/Qwen3-32B";
 
-export async function callChatModel({ systemPrompt, userPrompt, apiKey, baseUrl = DEFAULT_BASE_URL, model = DEFAULT_MODEL }) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ]
-    })
-  });
+// Serverless model hosts (Featherless included) can cold-start a rarely-used
+// model on first request; the gateway itself timed out around 60s in
+// practice. But a request can also just hang with no response at all — no
+// error, no timeout — so a client-side abort is the only thing that
+// guarantees this doesn't block the whole multi-repo pass indefinitely.
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+export async function callChatModel({ systemPrompt, userPrompt, apiKey, baseUrl = DEFAULT_BASE_URL, model = DEFAULT_MODEL, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`LLM call timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw new Error(`LLM call failed (${response.status}): ${await response.text()}`);
   }

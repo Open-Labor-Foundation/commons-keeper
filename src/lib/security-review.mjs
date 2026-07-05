@@ -42,6 +42,7 @@ import {
 } from "./dependency-audit.mjs";
 import { proposeDependencyMitigations } from "./dependency-mitigation.mjs";
 import { loadTargets, loadState, saveState } from "./config-state.mjs";
+import { ensureGithubAppAuth } from "./github-app-auth.mjs";
 
 export { loadTargets, loadState, saveState };
 
@@ -216,6 +217,13 @@ export async function runSecurityReview(options) {
       summary.skipped.push({ repo: target.name, reason: target.skipReason ?? "skipped" });
       continue;
     }
+
+    // A single run of this loop, across every target repo, can take long
+    // enough (cold-start LLM latency, retries) to outlive the 1-hour
+    // installation-token lifetime — refresh per repo, not just once at
+    // process start, so a late-loop repo doesn't lose findings to a stale
+    // token (no-ops when App auth isn't configured).
+    await ensureGithubAppAuth(process.env);
 
     const workDir = path.join(workRoot, target.name);
     const headSha = cloneOrUpdate(target.cloneUrl, workDir);

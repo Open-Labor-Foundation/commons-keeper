@@ -262,18 +262,30 @@ export async function runSecurityReview(options) {
     let filedCount = 0;
     let findingCount = 0;
 
+    let codeReviewFailed = false;
     if (chunks.length > 0 && !apiKey) {
       console.error(`Warning: no LLM API key configured — skipping code review for ${target.name} (dependency audit still runs)`);
     } else {
       for (const chunk of chunks) {
-        const findings = await callSecurityReviewModel({
-          repoName: target.name,
-          label: chunk.label,
-          bodyText: chunk.text,
-          apiKey,
-          baseUrl,
-          model
-        });
+        let findings;
+        try {
+          findings = await callSecurityReviewModel({
+            repoName: target.name,
+            label: chunk.label,
+            bodyText: chunk.text,
+            apiKey,
+            baseUrl,
+            model
+          });
+        } catch (error) {
+          // A transient LLM API failure (timeout, 5xx) shouldn't abort the
+          // whole multi-repo pass — log it, skip this chunk, and leave the
+          // reviewed-commit marker where it is so this diff gets retried
+          // next pass instead of silently skipped.
+          console.error(`Warning: code review call failed for ${target.name} (${chunk.label}): ${error.message}`);
+          codeReviewFailed = true;
+          continue;
+        }
         const qualifying = findings.filter(
           (f) => Number(f.confidence ?? 0) >= confidenceThreshold && QUALIFYING_SEVERITIES.has(f.severity)
         );
@@ -351,9 +363,10 @@ export async function runSecurityReview(options) {
 
     // Only advance the reviewed-commit marker if the code diff actually got an
     // LLM pass (or there was nothing to review). If it was skipped for lack of
-    // an API key, leave the marker where it is so the real diff gets reviewed
-    // once a key is configured, instead of silently reviewing.
-    if (chunks.length === 0 || apiKey) {
+    // an API key, or a chunk's LLM call failed (transient API error), leave
+    // the marker where it is so the real diff gets reviewed next pass instead
+    // of silently skipped.
+    if (chunks.length === 0 || (apiKey && !codeReviewFailed)) {
       state.repos[target.name] = { lastReviewedSha: headSha, lastReviewedAt: new Date().toISOString() };
     }
   }

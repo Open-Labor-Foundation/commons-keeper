@@ -102,9 +102,18 @@ function findingFingerprint(finding) {
   return `${finding.category ?? "finding"}::${finding.file ?? "unknown"}:${finding.line ?? 0}`;
 }
 
-export function getExistingAdvisorySummaries(targetRepo) {
+// A single repo's chunk-review loop (commons-board alone has 25 chunks) can
+// itself run long enough to outlive a token refreshed only once at the top
+// of that repo's iteration — refresh immediately before every actual `gh`
+// call instead, so however long processing took, the token used is fresh.
+async function ghExec(args, options) {
+  await ensureGithubAppAuth(process.env);
+  return execFileSync("gh", args, options);
+}
+
+export async function getExistingAdvisorySummaries(targetRepo) {
   try {
-    const out = execFileSync("gh", [
+    const out = await ghExec([
       "api", `repos/${targetRepo}/security-advisories`,
       "--paginate",
       "--jq", ".[].summary"
@@ -152,7 +161,7 @@ function buildCodeFindingVulnerability(targetName, finding) {
   };
 }
 
-export function createOrPreviewAdvisory(targetRepo, summary, description, vulnerabilities, severity, existingSummaries, dryRun) {
+export async function createOrPreviewAdvisory(targetRepo, summary, description, vulnerabilities, severity, existingSummaries, dryRun) {
   if (existingSummaries.has(summary)) {
     return { created: false, reason: "duplicate" };
   }
@@ -161,11 +170,11 @@ export function createOrPreviewAdvisory(targetRepo, summary, description, vulner
   }
   try {
     const payload = { summary, description, severity, vulnerabilities };
-    const out = execFileSync("gh", [
+    const out = (await ghExec([
       "api", `repos/${targetRepo}/security-advisories`,
       "-X", "POST",
       "--input", "-"
-    ], { encoding: "utf8", input: JSON.stringify(payload) }).trim();
+    ], { encoding: "utf8", input: JSON.stringify(payload) })).trim();
     const { html_url: url } = JSON.parse(out);
     return { created: true, url, summary };
   } catch (error) {
@@ -266,7 +275,7 @@ export async function runSecurityReview(options) {
     // continuously updated advisory database, so it must run every pass
     // regardless of whether any code changed since last time.
     const targetRepo = `Open-Labor-Foundation/${target.name}`;
-    const existingSummaries = getExistingAdvisorySummaries(targetRepo);
+    const existingSummaries = await getExistingAdvisorySummaries(targetRepo);
     let filedCount = 0;
     let findingCount = 0;
 
@@ -299,7 +308,7 @@ export async function runSecurityReview(options) {
         );
         findingCount += qualifying.length;
         for (const finding of qualifying) {
-          const result = fileSecurityAdvisory(targetRepo, target.name, finding, existingSummaries, dryRun);
+          const result = await fileSecurityAdvisory(targetRepo, target.name, finding, existingSummaries, dryRun);
           if (result.created) {
             filedCount += 1;
             existingSummaries.add(result.summary);
@@ -316,7 +325,7 @@ export async function runSecurityReview(options) {
       dependencyFindingCount = dependencyFindings.length;
       for (const finding of dependencyFindings) {
         const summary = buildDependencyAdvisorySummary(finding);
-        const result = createOrPreviewAdvisory(
+        const result = await createOrPreviewAdvisory(
           targetRepo,
           summary,
           buildDependencyAdvisoryDescription(finding),

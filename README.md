@@ -9,6 +9,11 @@ issues.
 
 This is maintenance infrastructure. It runs on the stack, not in it.
 
+> See [open-labor-foundation/ARCHITECTURE.md](https://github.com/Open-Labor-Foundation/open-labor-foundation/blob/main/ARCHITECTURE.md)
+> for the full ecosystem picture. No architectural shortcoming identified for
+> this repo — its independence from what it certifies is by design and is
+> expected to remain permanent, unlike commons-devloop.
+
 ---
 
 ## What it does
@@ -27,7 +32,7 @@ Each pass through the catalog, commons-keeper:
 
 Each pass, commons-keeper clones or updates every repo listed in
 [`config/security-review-targets.json`](config/security-review-targets.json)
-(the full OLF stack) and runs two independent checks per repo:
+(the full OLF stack) and runs five independent checks per repo:
 
 1. **Code-logic review** — an LLM reasoning pass over whatever code changed
    since the last pass (or, the first time it sees a repo, a bounded first
@@ -35,22 +40,51 @@ Each pass, commons-keeper clones or updates every repo listed in
    injection, hardcoded secrets — the same way an interactive review would.
    Needs an LLM key; if none is configured this step is skipped (logged, not
    fatal) rather than blocking the rest of the pass.
-2. **Dependency audit** — `npm audit` against the repo's `package-lock.json`,
-   which checks currently pinned dependency versions against the GitHub
-   Advisory Database — a real, continuously updated CVE/GHSA feed. Runs
-   every pass regardless of whether any code changed, since a new advisory
-   can apply to a dependency version you haven't touched. Needs no LLM key.
-   Skipped for repos with no `package.json`.
+2. **SAST** — a [semgrep](https://semgrep.dev/) pass (`p/security-audit` +
+   `p/owasp-top-ten` rulesets) over the exact same file scope as the
+   code-logic pass. Rule-based, not judgment-based: catches the same broad
+   vulnerability classes via fixed pattern matching, with none of an LLM's
+   variance. Needs no LLM key.
+3. **Secrets scan** — a [gitleaks](https://github.com/gitleaks/gitleaks)
+   pass over the full working tree, every pass regardless of whether code
+   changed, since it also catches secrets that predate commons-keeper's
+   first look at a repo. Purpose-built for this, unlike the code-logic
+   pass's incidental "flag hardcoded secrets if you notice one" instruction.
+   Findings never include the matched value — only rule id, file, and line;
+   any hit files as `critical` severity with a rotate-immediately
+   recommendation. Needs no LLM key.
+4. **Dependency audit (npm)** — `npm audit` against the repo's
+   `package-lock.json`, which checks currently pinned dependency versions
+   against the GitHub Advisory Database — a real, continuously updated
+   CVE/GHSA feed. Runs every pass regardless of whether any code changed,
+   since a new advisory can apply to a dependency version you haven't
+   touched. Needs no LLM key. Skipped for repos with no `package.json`.
+5. **Dependency audit (other ecosystems)** — an
+   [osv-scanner](https://github.com/google/osv-scanner) pass covering
+   dependency ecosystems npm audit can't see (Python, Go, etc. —
+   `labor-commons` and `commons-artifacts` both carry Python code). Its
+   npm-ecosystem results are filtered out, since npm audit already owns
+   that ecosystem; osv-scanner only adds coverage npm audit structurally
+   can't provide. Needs no LLM key.
 
-Findings that clear their respective thresholds get filed as GitHub issues
-(labeled `security`, `human-review`) directly on the repo they were found
-in, deduplicated against already-filed issues.
+Each of the five is individually toggleable off (`--no-sast`,
+`--no-secrets-scan`, `--no-osv`, `--no-mitigations`, or the matching
+`SECURITY_REVIEW_*` env var — see [`.env.example`](.env.example)) without
+disabling the rest of the pass.
 
-The code-logic pass and the dependency audit check fundamentally different
-things and neither substitutes for the other: the LLM pass reasons about
-your own code and will never know about a CVE; `npm audit` only knows about
-published advisories for third-party packages and will never catch a bug in
-code you wrote.
+Findings that clear their respective thresholds get filed as private draft
+GitHub security advisories (the repo's Security tab, not public issues —
+an unpatched vulnerability shouldn't be disclosed the moment it's found),
+deduplicated against already-filed advisories.
+
+None of the five checks substitutes for another — each catches something
+structurally invisible to the rest: the LLM pass reasons about your code's
+*logic* but will never know about a CVE or reliably catch every hardcoded
+secret; semgrep catches known vulnerability patterns by rule, not by
+reasoning about intent; gitleaks is a dedicated, full-tree secrets sweep;
+`npm audit` and osv-scanner only know about published advisories for
+third-party packages (across different ecosystems) and will never catch a
+bug in code you wrote.
 
 ### Dependency mitigation (when there's no upstream fix)
 
@@ -136,6 +170,8 @@ commons-keeper runs as a single long-lived Docker container. The entrypoint star
 | Security review (`security-review.mjs`) | 24 hours | `KEEPER_SECURITY_INTERVAL_SECONDS` |
 
 A failed pass in either loop is logged and retried on its next tick — it doesn't crash the container or block the other loop. State and reports persist via volume mounts at `/commons-keeper/state` and `/commons-keeper/reports`; the security-review loop's per-repo checkouts and last-reviewed-commit state live under `/commons-keeper/state` as well.
+
+The container runs as the base image's built-in non-root `node` user (uid 1000), not root — this process clones other repos and runs several third-party scanners against them, so it shouldn't hold more filesystem privilege than it needs. Named volumes (as in the example below) pick up the right ownership automatically; if you bind-mount host directories instead, `chown` them to uid 1000 first. If you're using `GITHUB_APP_PRIVATE_KEY_PATH`, make sure the key file is readable by uid 1000 on the host.
 
 ```bash
 docker build -t commons-keeper .

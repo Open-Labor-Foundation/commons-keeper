@@ -108,6 +108,51 @@ not, and will not, autonomously patch or open PRs against third-party
 projects on the public internet — that's a meaningfully different, riskier
 capability than anything else commons-keeper does, and hasn't been built.
 
+### PR verification loop
+
+Independent claim-vs-diff review for every open PR across
+[`config/security-review-targets.json`](config/security-review-targets.json):
+does the PR's own description ("wired in," "automatic," "resolved,"
+"verified," "no longer a gap") actually match its diff, or does it ship a
+real mechanism with no real caller — a route or field nothing invokes, a
+backend capability with no UI path, a doc edited to assert a gap is closed
+rather than the gap being closed.
+
+This exists because that exact pattern was found repeatedly, by hand,
+across this org's PR history in a single session — see `GOVERNANCE.md`
+in `open-labor-foundation`. The check that caught it every time was
+structural, not clever: a reviewer with no memory of the authoring
+session, given only the claim and the diff, forced to independently
+re-derive an answer instead of trusting what was already written down.
+This automates exactly that, on a schedule, so it doesn't depend on a
+human — or an authoring session — remembering to ask for it.
+
+Each pass, for every open PR not yet reviewed at its current head commit:
+
+1. **Deterministic pre-checks** — cheap, exact, no LLM needed. Does the PR
+   body reference another PR number as though it were merged/resolved when
+   it's actually still open? Does the diff use reachability language
+   ("wired in," "automatic") while touching only backend files, on a repo
+   with a real end-user UI, with nothing under that UI's directory?
+2. **LLM claim-vs-diff pass** — given only the PR's title, description,
+   and diff (no other context), checks every "done/resolved/verified"
+   claim against what the diff actually delivers. Needs an LLM key; if
+   none is configured this step is skipped (logged, not fatal) and the
+   deterministic checks still run.
+
+Findings that clear the confidence threshold get posted as a PR comment —
+not a silent log, not a merge block (commons-keeper has no merge
+authority anywhere in this repo) — the same "surfaced, not silently
+resolved" principle `GOVERNANCE.md` states for disagreement generally.
+
+**Scope, stated plainly:** this is a single structured LLM pass over the
+diff and description, plus the two deterministic pre-checks above. It is
+**not** a full agentic reviewer with repo tool access — it can't
+dynamically grep the rest of a repo, run a test suite, or verify a claim
+that depends on cross-file state the diff alone doesn't show. That's a
+real capability gap, not closed here; it's the natural next extension if
+this proves out.
+
 ---
 
 ## Modes
@@ -162,14 +207,15 @@ done
 
 ## Docker
 
-commons-keeper runs as a single long-lived Docker container. The entrypoint starts two independent loops that run for the container's entire lifetime — neither depends on an external cron or scheduler:
+commons-keeper runs as a single long-lived Docker container. The entrypoint starts three independent loops that run for the container's entire lifetime — none depends on an external cron or scheduler:
 
 | Loop | Default interval | Override |
 |---|---|---|
 | Catalog (`improve-catalog.mjs` + issue filing) | 1 hour | `KEEPER_CATALOG_INTERVAL_SECONDS` |
 | Security review (`security-review.mjs`) | 24 hours | `KEEPER_SECURITY_INTERVAL_SECONDS` |
+| PR verification (`pr-verification.mjs`) | 30 minutes | `KEEPER_PR_VERIFICATION_INTERVAL_SECONDS` |
 
-A failed pass in either loop is logged and retried on its next tick — it doesn't crash the container or block the other loop. State and reports persist via volume mounts at `/commons-keeper/state` and `/commons-keeper/reports`; the security-review loop's per-repo checkouts and last-reviewed-commit state live under `/commons-keeper/state` as well.
+A failed pass in any loop is logged and retried on its next tick — it doesn't crash the container or block the other loops. State and reports persist via volume mounts at `/commons-keeper/state` and `/commons-keeper/reports`; the security-review loop's per-repo checkouts and last-reviewed-commit state, and the PR-verification loop's per-PR last-reviewed-commit state, both live under `/commons-keeper/state` as well.
 
 The container runs as the base image's built-in non-root `node` user (uid 1000), not root — this process clones other repos and runs several third-party scanners against them, so it shouldn't hold more filesystem privilege than it needs. Named volumes (as in the example below) pick up the right ownership automatically; if you bind-mount host directories instead, `chown` them to uid 1000 first. If you're using `GITHUB_APP_PRIVATE_KEY_PATH`, make sure the key file is readable by uid 1000 on the host.
 

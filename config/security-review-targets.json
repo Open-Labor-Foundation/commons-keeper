@@ -42,6 +42,20 @@
     "codeFiles": []
   },
   {
+    "name": "labor-commons-curator",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/labor-commons-curator.git",
+    "codeDirs": ["src", "build", ".github/workflows"],
+    "codeExtensions": [".ts", ".mjs", ".js", ".sh", ".yml", ".yaml"],
+    "codeFiles": ["package.json"]
+  },
+  {
+    "name": "artifact-commons",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/artifact-commons.git",
+    "codeDirs": ["scripts", "board-addins", ".github/workflows"],
+    "codeExtensions": [".mjs", ".js", ".json", ".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
     "name": "commons-specs",
     "cloneUrl": "https://github.com/Open-Labor-Foundation/commons-specs.git",
     "skip": true,

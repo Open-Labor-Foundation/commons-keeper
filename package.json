@@ -19,6 +19,8 @@
     "keeper:issues:create": "node src/create-spec-pack-issues.mjs",
     "keeper:issues:create:dry": "node src/create-spec-pack-issues.mjs --dry-run",
     "keeper:security:review": "node src/security-review.mjs",
-    "keeper:security:review:dry": "node src/security-review.mjs --dry-run"
+    "keeper:security:review:dry": "node src/security-review.mjs --dry-run",
+    "keeper:pr-verification:run": "node src/pr-verification.mjs",
+    "keeper:pr-verification:dry": "node src/pr-verification.mjs --dry-run"
   }
 }

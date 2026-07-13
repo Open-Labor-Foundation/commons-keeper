@@ -7,6 +7,7 @@ KEEPER_DIR="/commons-keeper"
 
 CATALOG_INTERVAL_SECONDS="${KEEPER_CATALOG_INTERVAL_SECONDS:-3600}"
 SECURITY_INTERVAL_SECONDS="${KEEPER_SECURITY_INTERVAL_SECONDS:-86400}"
+PR_VERIFICATION_INTERVAL_SECONDS="${KEEPER_PR_VERIFICATION_INTERVAL_SECONDS:-1800}"
 
 # When GITHUB_APP_ID/GITHUB_APP_INSTALLATION_ID/GITHUB_APP_PRIVATE_KEY_PATH
 # are set, mint a fresh olf-keeper installation token into GH_TOKEN. No-op
@@ -70,6 +71,14 @@ run_security_pass() {
   )
 }
 
+run_pr_verification_pass() {
+  refresh_gh_token
+  (
+    cd "$KEEPER_DIR"
+    node src/pr-verification.mjs
+  )
+}
+
 catalog_loop() {
   while true; do
     run_catalog_pass "$@" || echo "catalog pass failed — will retry in ${CATALOG_INTERVAL_SECONDS}s"
@@ -84,7 +93,15 @@ security_loop() {
   done
 }
 
+pr_verification_loop() {
+  while true; do
+    run_pr_verification_pass || echo "pr-verification pass failed — will retry in ${PR_VERIFICATION_INTERVAL_SECONDS}s"
+    sleep "$PR_VERIFICATION_INTERVAL_SECONDS"
+  done
+}
+
 catalog_loop "$@" &
 security_loop &
+pr_verification_loop &
 
 wait

@@ -35,6 +35,13 @@
     "codeFiles": []
   },
   {
+    "name": "artifact-commons",
+    "cloneUrl": "https://github.com/Open-Labor-Foundation/artifact-commons.git",
+    "codeDirs": ["board-addins", "scripts", ".github/workflows"],
+    "codeExtensions": [".py", ".js", ".mjs", ".ts", ".yml", ".yaml"],
+    "codeFiles": []
+  },
+  {
     "name": "open-labor-foundation",
     "cloneUrl": "https://github.com/Open-Labor-Foundation/open-labor-foundation.git",
     "codeDirs": [".github"],

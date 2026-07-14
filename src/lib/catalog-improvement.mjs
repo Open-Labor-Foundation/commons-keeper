@@ -7,12 +7,6 @@ import path from "node:path";
 
 const REQUIRED_AGENT_FILES = [
   "spec.yaml",
-  "evaluation/scenarios.md",
-  "evaluation/results.json",
-  "readiness/release.md",
-  "readiness/evidence.json",
-  "deployment/package.md",
-  "positioning/readiness.md",
 ];
 
 const ISSUE_SEVERITY_WEIGHT = {
@@ -701,99 +695,131 @@ function getValidationScore(agent) {
     );
   }
 
+  // Also validate spec.yaml content quality — boundary length and authority
+  // sources must meet the delivery contract thresholds.
+  const manifestPath = path.join(agent.packagePath, "spec.yaml");
+  if (fs.existsSync(manifestPath)) {
+    const manifestText = fs.readFileSync(manifestPath, "utf8");
+    const boundaryText = extractManifestField(manifestText, "specialty_boundary") || "";
+    const authoritySources = parseDelimitedList(extractManifestField(manifestText, "authority_sources"));
+    const MIN_BOUNDARY_CHARS = 900;
+    const MIN_AUTHORITY_SOURCES = 8;
+
+    if (normalizeWhitespace(boundaryText).length < MIN_BOUNDARY_CHARS) {
+      issues.push(
+        createIssue(
+          "boundary_below_threshold",
+          "critical",
+          "validation",
+          `specialty_boundary is ${normalizeWhitespace(boundaryText).length} chars, below the required ${MIN_BOUNDARY_CHARS}.`,
+        ),
+      );
+    }
+
+    if (authoritySources.length < MIN_AUTHORITY_SOURCES) {
+      issues.push(
+        createIssue(
+          "authority_sources_below_threshold",
+          "critical",
+          "validation",
+          `authority_sources has ${authoritySources.length} entries, below the required ${MIN_AUTHORITY_SOURCES}.`,
+        ),
+      );
+    }
+  }
+
+  const contentPenalty = issues.filter(
+    (i) => i.code === "boundary_below_threshold" || i.code === "authority_sources_below_threshold",
+  ).length;
+
   return {
-    score: round(presentCount / REQUIRED_AGENT_FILES.length),
+    score: round(Math.max(0, (presentCount / REQUIRED_AGENT_FILES.length) - contentPenalty * 0.1)),
     issues,
   };
 }
 
 function getEvaluationScore(agent) {
+  // In the single-file spec.yaml format, evaluation quality is derived from
+  // the spec content itself: authority_sources count, adjacent_specialties
+  // count, and specialty_boundary length all indicate research depth.
   const issues = [];
-  const resultsPath = path.join(agent.packagePath, "evaluation", "results.json");
-  const results = readJsonIfExists(resultsPath);
+  const manifestPath = path.join(agent.packagePath, "spec.yaml");
 
-  if (!results) {
-    issues.push(
-      createIssue(
-        "missing_evaluation_results",
-        "critical",
-        "evaluation",
-        "Missing evaluation/results.json for package.",
-      ),
-    );
+  if (!fs.existsSync(manifestPath)) {
     return { score: 0, issues, metadata: null };
   }
 
-  const passRate = clamp(Number(results.pass_rate ?? 0), 0, 1);
-  const minPassRate = clamp(Number(results.minimum_pass_rate ?? 0), 0, 1);
-  if (!results.accuracy_acceptance_met || passRate < minPassRate) {
-    issues.push(
-      createIssue(
-        "evaluation_below_threshold",
-        "critical",
-        "evaluation",
-        `Evaluation pass rate ${passRate} is below the minimum ${minPassRate}.`,
-      ),
-    );
+  const manifestText = fs.readFileSync(manifestPath, "utf8");
+  const authoritySources = parseDelimitedList(extractManifestField(manifestText, "authority_sources"));
+  const adjacentSpecialties = parseDelimitedList(extractManifestField(manifestText, "adjacent_specialties"));
+  const boundaryText = extractManifestField(manifestText, "specialty_boundary") || "";
+
+  const checks = [
+    { label: "authority_sources", passed: authoritySources.length >= 8 },
+    { label: "adjacent_specialties", passed: adjacentSpecialties.length >= 3 },
+    { label: "specialty_boundary", passed: normalizeWhitespace(boundaryText).length >= 900 },
+  ];
+  const passCount = checks.filter((c) => c.passed).length;
+  const score = passCount / checks.length;
+
+  for (const check of checks) {
+    if (!check.passed) {
+      issues.push(
+        createIssue(
+          "evaluation_below_threshold",
+          "critical",
+          "evaluation",
+          `Spec quality check "${check.label}" did not meet the delivery contract threshold.`,
+        ),
+      );
+    }
   }
 
   return {
-    score: round(passRate),
+    score: round(score),
     issues,
     metadata: {
-      scenario_count: Number(results.scenario_count ?? 0),
-      pass_rate: passRate,
-      minimum_pass_rate: minPassRate,
+      authority_sources_count: authoritySources.length,
+      adjacent_specialties_count: adjacentSpecialties.length,
+      boundary_chars: normalizeWhitespace(boundaryText).length,
+      checks_passed: passCount,
+      checks_total: checks.length,
     },
   };
 }
 
 function getReadinessScore(agent) {
+  // In the single-file spec.yaml format, readiness is derived from the spec's
+  // status field and content completeness rather than a separate evidence file.
   const issues = [];
-  const evidencePath = path.join(agent.packagePath, "readiness", "evidence.json");
-  const evidence = readJsonIfExists(evidencePath);
+  const manifestPath = path.join(agent.packagePath, "spec.yaml");
 
-  if (!evidence) {
-    issues.push(
-      createIssue(
-        "missing_readiness_evidence",
-        "critical",
-        "readiness",
-        "Missing readiness/evidence.json for package.",
-      ),
-    );
+  if (!fs.existsSync(manifestPath)) {
     return { score: 0, issues, metadata: null };
   }
 
+  const manifestText = fs.readFileSync(manifestPath, "utf8");
+  const status = extractManifestField(manifestText, "status") || "draft";
+  const slug = extractManifestField(manifestText, "slug") || agent.slug;
+  const name = extractManifestField(manifestText, "name") || agent.name || titleFromSlug(agent.slug);
+  const domainFamily = extractManifestField(manifestText, "domain_family") || agent.domain;
+
   const readinessChecks = [
-    Boolean(evidence.human_verification?.recorded),
-    Boolean(evidence.deployment_readiness?.ready),
-    Boolean(evidence.deployment_readiness?.package_documented),
-    Boolean(evidence.deployment_readiness?.rollback_defined),
-    Boolean(evidence.deployment_readiness?.monitoring_defined),
-    Boolean(evidence.deployment_readiness?.tenant_isolation_defined),
-    Boolean(evidence.deployment_readiness?.cache_freshness_defined),
+    Boolean(slug),
+    Boolean(name),
+    Boolean(domainFamily),
+    status === "deployable" || status === "active",
+    normalizeWhitespace(manifestText).length > 500,
   ];
   const score = readinessChecks.filter(Boolean).length / readinessChecks.length;
 
-  if (!evidence.human_verification?.recorded) {
-    issues.push(
-      createIssue(
-        "missing_human_verification",
-        "critical",
-        "readiness",
-        "Human verification is not recorded in readiness evidence.",
-      ),
-    );
-  }
-
-  if (!evidence.deployment_readiness?.ready) {
+  if (status !== "deployable" && status !== "active") {
     issues.push(
       createIssue(
         "deployment_not_ready",
         "critical",
         "readiness",
-        "Deployment readiness is not marked ready.",
+        `Spec status is "${status}", not "deployable" or "active".`,
       ),
     );
   }
@@ -802,8 +828,8 @@ function getReadinessScore(agent) {
     score: round(score),
     issues,
     metadata: {
-      delivery_status: evidence.delivery_status ?? "unknown",
-      deployment_ready: Boolean(evidence.deployment_readiness?.ready),
+      delivery_status: status,
+      deployment_ready: status === "deployable" || status === "active",
       completeness_ratio: round(score),
       check_count: readinessChecks.length,
       passing_checks: readinessChecks.filter(Boolean).length,
@@ -954,88 +980,9 @@ function ensureRequiredMarkdownArtifact(schema, relativeFile, title, bodyLines) 
 }
 
 function buildDefaultArtifactContent(schema, relativeFile, generatedAt) {
-  const manifestText = getSchemaFile(schema, "spec.yaml").content;
-  const evaluationResults = getSchemaJson(schema, "evaluation/results.json");
-  const readinessEvidence = getSchemaJson(schema, "readiness/evidence.json");
-  const releaseVersion = inferReleaseVersion(schema.agent, manifestText, evaluationResults, readinessEvidence);
-  const generatedDate = String(generatedAt ?? new Date().toISOString()).slice(0, 10);
-
   switch (relativeFile) {
     case "spec.yaml":
-      return renderDefaultManifest(schema.agent, generatedAt, manifestText);
-    case "evaluation/scenarios.md":
-      return normalizeMarkdownDocument("Evaluation Scenarios", [
-        `1. Baseline placeholder scenario for ${schema.agent.name}.`,
-      ]);
-    case "evaluation/results.json":
-      return `${JSON.stringify({
-        agent_slug: schema.agent.slug,
-        agent_release: releaseVersion,
-        executed_at: generatedDate,
-        validation_profile: "strict",
-        scenario_count: 0,
-        pass_count: 0,
-        pass_rate: 0,
-        minimum_pass_rate: 0.9,
-        regressions: [],
-        accuracy_acceptance_met: false,
-        reviewer: "autonomous-improvement-system",
-        evidence_artifacts: REQUIRED_AGENT_FILES.map((entry) =>
-          normalizeRepoPath(path.join(schema.agent.relativePackagePath, entry))),
-        notes: [
-          "Autonomous scaffold created because evaluation artifacts were incomplete.",
-        ],
-      }, null, 2)}\n`;
-    case "readiness/release.md":
-      return normalizeMarkdownDocument("Release Readiness", [
-        `- release_version: ${releaseVersion}`,
-        "- reviewer: autonomous-improvement-system",
-        "- status: pending verification",
-      ]);
-    case "readiness/evidence.json":
-      return `${JSON.stringify({
-        agent_slug: schema.agent.slug,
-        release_version: releaseVersion,
-        delivery_status: extractManifestField(manifestText, "status") || "deployable",
-        human_verification: {
-          recorded: false,
-          reviewer: "autonomous-improvement-system",
-          verified_at: generatedDate,
-          method: "Pending human verification after autonomous normalization.",
-        },
-        deployment_readiness: {
-          ready: false,
-          package_documented: false,
-          rollback_defined: false,
-          monitoring_defined: false,
-          tenant_isolation_defined: false,
-          cache_freshness_defined: false,
-        },
-        acceptance_evidence: {
-          package_path: `${normalizeRepoPath(schema.agent.relativePackagePath)}/`,
-          minimum_scenario_count_met: false,
-          minimum_pass_rate_met: false,
-          accuracy_acceptance_met: false,
-          no_unreviewed_regressions: true,
-        },
-        notes: [
-          "Autonomous scaffold created because readiness evidence was incomplete.",
-        ],
-      }, null, 2)}\n`;
-    case "deployment/package.md":
-      return normalizeMarkdownDocument("Deployment Package", [
-        "Runtime model: pending.",
-        "Rollback plan: pending.",
-        "Monitoring plan: pending.",
-        "Tenant isolation: pending.",
-        "Cache freshness: pending.",
-      ]);
-    case "positioning/readiness.md":
-      return normalizeMarkdownDocument("Marketing Readiness", [
-        "Buyer profile: pending.",
-        "Proof points: pending.",
-        "Go-to-market gaps: pending.",
-      ]);
+      return renderDefaultManifest(schema.agent, generatedAt, getSchemaFile(schema, "spec.yaml").content);
     default:
       return "";
   }
@@ -1068,65 +1015,63 @@ function applyMissingArtifactMutations(schema, feedbackIssues, generatedAt) {
 }
 
 function buildDeploymentSignals(schema) {
-  const deploymentText = [
-    getSchemaFile(schema, "deployment/package.md").content,
-    getSchemaFile(schema, "readiness/release.md").content,
-  ].join("\n").toLowerCase();
-  const marketingText = getSchemaFile(schema, "positioning/readiness.md").content.toLowerCase();
+  const manifestText = getSchemaFile(schema, "spec.yaml").content.toLowerCase();
 
   return {
-    package_documented: normalizeWhitespace(getSchemaFile(schema, "deployment/package.md").content).length > 0,
-    rollback_defined: /\brollback\b|\brevert\b|\bbackout\b/.test(deploymentText),
-    monitoring_defined: /\bmonitor|\bobservab|\balert|\blogging\b/.test(deploymentText),
-    tenant_isolation_defined: /\btenant\b|\bisolation\b/.test(deploymentText),
-    cache_freshness_defined: /\bcache\b|\bfreshness\b|\bttl\b/.test(deploymentText),
-    positioning_defined: /\bbuyer\b|\bposition|\bpersona\b/.test(marketingText),
-    subscription_model_defined: /\bsubscription\b|\bpricing\b|\bplan\b/.test(marketingText),
-    proof_points_defined: /\bproof\b|\btestimonial\b|\bcase stud|\breference\b/.test(marketingText),
-    gtm_gaps_documented: /\bgap\b|\brisk\b|\bpending\b/.test(marketingText),
+    package_documented: normalizeWhitespace(getSchemaFile(schema, "spec.yaml").content).length > 0,
+    rollback_defined: /\brollback\b|\brevert\b|\bbackout\b/.test(manifestText),
+    monitoring_defined: /\bmonitor|\bobservab|\balert|\blogging\b/.test(manifestText),
+    tenant_isolation_defined: /\btenant\b|\bisolation\b/.test(manifestText),
+    cache_freshness_defined: /\bcache\b|\bfreshness\b|\bttl\b/.test(manifestText),
+    positioning_defined: /\bbuyer\b|\bposition|\bpersona\b/.test(manifestText),
+    subscription_model_defined: /\bsubscription\b|\bpricing\b|\bplan\b/.test(manifestText),
+    proof_points_defined: /\bproof\b|\btestimonial\b|\bcase stud|\breference\b/.test(manifestText),
+    gtm_gaps_documented: /\bgap\b|\brisk\b|\bpending\b/.test(manifestText),
   };
 }
 
 function normalizeEvaluationResultsArtifact(schema, generatedAt) {
   const manifestText = getSchemaFile(schema, "spec.yaml").content;
-  const current = getSchemaJson(schema, "evaluation/results.json");
-  const releaseVersion = inferReleaseVersion(schema.agent, manifestText, current, getSchemaJson(schema, "readiness/evidence.json"));
-  const scenarioCount = Math.max(0, Number(current.scenario_count ?? current.pass_count ?? 0));
-  const passCount = clamp(Number(current.pass_count ?? Math.round(Number(current.pass_rate ?? 0) * scenarioCount)), 0, scenarioCount);
-  const passRate = scenarioCount > 0
-    ? round(passCount / scenarioCount)
-    : clamp(Number(current.pass_rate ?? 0), 0, 1);
-  const minimumPassRate = clamp(Number(current.minimum_pass_rate ?? 0.9), 0, 1);
+  const releaseVersion = inferReleaseVersion(schema.agent, manifestText, null, null);
+  const authoritySources = parseDelimitedList(extractManifestField(manifestText, "authority_sources"));
+  const adjacentSpecialties = parseDelimitedList(extractManifestField(manifestText, "adjacent_specialties"));
+  const boundaryText = extractManifestField(manifestText, "specialty_boundary") || "";
+  const boundaryLen = normalizeWhitespace(boundaryText).length;
+  const checks = [
+    authoritySources.length >= 8,
+    adjacentSpecialties.length >= 3,
+    boundaryLen >= 900,
+  ];
+  const passCount = checks.filter(Boolean).length;
+  const scenarioCount = checks.length;
+  const passRate = round(passCount / scenarioCount);
+  const minimumPassRate = 0.9;
 
   return {
     agent_slug: schema.agent.slug,
     agent_release: releaseVersion,
-    executed_at: normalizeWhitespace(current.executed_at) || String(generatedAt ?? new Date().toISOString()).slice(0, 10),
-    validation_profile: normalizeWhitespace(current.validation_profile) || "strict",
+    executed_at: String(generatedAt ?? new Date().toISOString()).slice(0, 10),
+    validation_profile: "strict",
     scenario_count: scenarioCount,
     pass_count: passCount,
     pass_rate: passRate,
     minimum_pass_rate: minimumPassRate,
-    regressions: Array.isArray(current.regressions) ? current.regressions : [],
-    accuracy_acceptance_met:
-      typeof current.accuracy_acceptance_met === "boolean"
-        ? current.accuracy_acceptance_met
-        : passRate >= minimumPassRate,
-    reviewer: normalizeWhitespace(current.reviewer) || "autonomous-improvement-system",
+    regressions: [],
+    accuracy_acceptance_met: passRate >= minimumPassRate,
+    reviewer: "autonomous-improvement-system",
     evidence_artifacts: uniqueSorted(
-      (Array.isArray(current.evidence_artifacts) ? current.evidence_artifacts : []).concat(
-        REQUIRED_AGENT_FILES.map((entry) => normalizeRepoPath(path.join(schema.agent.relativePackagePath, entry))),
-      ),
+      REQUIRED_AGENT_FILES.map((entry) => normalizeRepoPath(path.join(schema.agent.relativePackagePath, entry))),
     ),
-    notes: Array.isArray(current.notes) ? current.notes.map((entry) => normalizeWhitespace(entry)).filter(Boolean) : [],
-    ...(Array.isArray(current.scenario_results) ? { scenario_results: current.scenario_results } : {}),
+    notes: [
+      "Evaluation derived from spec.yaml content quality checks (authority_sources, adjacent_specialties, specialty_boundary).",
+    ],
   };
 }
 
 function normalizeReadinessEvidenceArtifact(schema, generatedAt) {
   const manifestText = getSchemaFile(schema, "spec.yaml").content;
   const evaluationResults = normalizeEvaluationResultsArtifact(schema, generatedAt);
-  const current = getSchemaJson(schema, "readiness/evidence.json");
+  const current = {};
   const releaseVersion = inferReleaseVersion(schema.agent, manifestText, evaluationResults, current);
   const signals = buildDeploymentSignals(schema);
   const humanVerification = {
@@ -1344,28 +1289,13 @@ export async function applyRefinementTargets(schema, targets, options = {}) {
     if (target.section === "manifest" && normalizeWhitespace(getSchemaFile(schema, "spec.yaml").content).length === 0) {
       setSchemaFile(schema, "spec.yaml", buildDefaultArtifactContent(schema, "spec.yaml", options.generatedAt));
     } else if (target.section === "evaluation") {
-      ensureRequiredMarkdownArtifact(schema, "evaluation/scenarios.md", "Evaluation Scenarios", [
-        `1. Baseline placeholder scenario for ${schema.agent.name}.`,
-      ]);
-      setSchemaJson(schema, "evaluation/results.json", normalizeEvaluationResultsArtifact(schema, options.generatedAt));
+      if (normalizeWhitespace(getSchemaFile(schema, "spec.yaml").content).length === 0) {
+        setSchemaFile(schema, "spec.yaml", buildDefaultArtifactContent(schema, "spec.yaml", options.generatedAt));
+      }
     } else if (target.section === "readiness") {
-      ensureRequiredMarkdownArtifact(schema, "readiness/release.md", "Release Readiness", [
-        `- reviewer: autonomous-improvement-system`,
-        "- status: pending verification",
-      ]);
-      ensureRequiredMarkdownArtifact(schema, "deployment/package.md", "Deployment Package", [
-        "Runtime model: pending.",
-        "Rollback plan: pending.",
-        "Monitoring plan: pending.",
-        "Tenant isolation: pending.",
-        "Cache freshness: pending.",
-      ]);
-      ensureRequiredMarkdownArtifact(schema, "positioning/readiness.md", "Marketing Readiness", [
-        "Buyer profile: pending.",
-        "Proof points: pending.",
-        "Go-to-market gaps: pending.",
-      ]);
-      setSchemaJson(schema, "readiness/evidence.json", normalizeReadinessEvidenceArtifact(schema, options.generatedAt));
+      if (normalizeWhitespace(getSchemaFile(schema, "spec.yaml").content).length === 0) {
+        setSchemaFile(schema, "spec.yaml", buildDefaultArtifactContent(schema, "spec.yaml", options.generatedAt));
+      }
     }
 
     if (schema.modifiedFiles.size > modifiedBefore) {

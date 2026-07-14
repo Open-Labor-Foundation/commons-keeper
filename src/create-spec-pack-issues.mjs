@@ -179,7 +179,7 @@ function buildIssueBody(agentResult, priority) {
     formatRefinementTargets(agentResult.refinement_targets),
     "### Action Required",
     "",
-    "Review the specialist spec pack and address the issues above. Update `readiness/evidence.json` to reflect current source freshness, re-run evaluation scenarios if needed, and ensure all required files are present.",
+    "Review the specialist spec pack and address the issues above. Update `spec.yaml` to reflect current source freshness, ensure authority_sources and adjacent_specialties meet minimum thresholds, and verify specialty_boundary length.",
     "",
     "---",
     `*Filed by commons-keeper — ${new Date().toISOString().slice(0, 10)}*`,
